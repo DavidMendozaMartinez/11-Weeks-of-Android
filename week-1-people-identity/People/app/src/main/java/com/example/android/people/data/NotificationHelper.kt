@@ -15,12 +15,7 @@
 
 package com.example.android.people.data
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Person
-import android.app.RemoteInput
+import android.app.*
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -77,7 +72,44 @@ class NotificationHelper(private val context: Context) {
 
     @WorkerThread
     fun updateShortcuts(importantContact: Contact?) {
-        // TODO 2: Create dynamic shortcuts.
+        var shortcuts = Contact.CONTACTS.map { contact ->
+            val icon = Icon.createWithAdaptiveBitmap(
+                    context.resources.assets.open(contact.icon).use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+            )
+            ShortcutInfo.Builder(context, contact.shortcutId)
+                    .setLocusId(LocusId(contact.shortcutId))
+                    .setActivity(ComponentName(context, MainActivity::class.java))
+                    .setShortLabel(contact.name)
+                    .setIcon(icon)
+                    .setLongLived(true)
+                    .setCategories(setOf("com.example.android.bubbles.category.TEXT_SHARE_TARGET"))
+                    .setIntent(
+                            Intent(context, MainActivity::class.java)
+                                    .setAction(Intent.ACTION_VIEW)
+                                    .setData(
+                                            Uri.parse(
+                                                    "https://android.example.com/chat/${contact.id}"
+                                            )
+                                    )
+                    )
+                    .setPerson(
+                            Person.Builder()
+                                    .setName(contact.name)
+                                    .setIcon(icon)
+                                    .build()
+                    )
+                    .build()
+        }
+        if (importantContact != null) {
+            shortcuts = shortcuts.sortedByDescending { it.id == importantContact.shortcutId }
+        }
+        val maxCount = shortcutManager.maxShortcutCountPerActivity
+        if (shortcuts.size > maxCount) {
+            shortcuts = shortcuts.take(maxCount)
+        }
+        shortcutManager.addDynamicShortcuts(shortcuts)
     }
 
     @WorkerThread
@@ -89,13 +121,36 @@ class NotificationHelper(private val context: Context) {
         val contentUri = "https://android.example.com/chat/${chat.contact.id}".toUri()
 
         val builder = Notification.Builder(context, CHANNEL_NEW_MESSAGES)
-            // TODO 5: Set up a BubbleMetadata.
+            .setBubbleMetadata(
+                    Notification.BubbleMetadata
+                            .Builder(
+                                    PendingIntent.getActivity(
+                                            context,
+                                            REQUEST_BUBBLE,
+                                            Intent(context, BubbleActivity::class.java)
+                                                    .setAction(Intent.ACTION_VIEW)
+                                                    .setData(contentUri),
+                                            PendingIntent.FLAG_UPDATE_CURRENT
+                                    ),
+                                    icon
+                            )
+                            .setDesiredHeightResId(R.dimen.bubble_height)
+                            .apply {
+                                if (fromUser) {
+                                    setAutoExpandBubble(true)
+                                    setSuppressNotification(true)
+                                }
+                            }
+                            .build()
+            )
             // The user can turn off the bubble in system settings. In that case, this notification
             // is shown as a normal notification instead of a bubble. Make sure that this
             // notification works as a normal notification as well.
             .setContentTitle(chat.contact.name)
             .setSmallIcon(R.drawable.ic_message)
-            // TODO 4: Associate the notification with a shortcut.
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setShortcutId(chat.contact.shortcutId)
+            .setLocusId(LocusId(chat.contact.shortcutId))
             .addPerson(person)
             .setShowWhen(true)
             // The content Intent is used when the user clicks on the "Open Content" icon button on
@@ -131,8 +186,29 @@ class NotificationHelper(private val context: Context) {
                     .setAllowGeneratedReplies(true)
                     .build()
             )
-            // TODO 1: Use MessagingStyle.
-            .setContentText(chat.messages.last().text)
+            .setStyle(
+                    Notification.MessagingStyle(user)
+                            .apply {
+                                val lastId = chat.messages.last().id
+                                for (message in chat.messages) {
+                                    val m = Notification.MessagingStyle.Message(
+                                            message.text,
+                                            message.timestamp,
+                                            if (message.isIncoming) person else null
+                                    ).apply {
+                                        if (message.photoUri != null) {
+                                            setData(message.photoMimeType, message.photoUri)
+                                        }
+                                    }
+                                    if (message.id < lastId) {
+                                        addHistoricMessage(m)
+                                    } else {
+                                        addMessage(m)
+                                    }
+                                }
+                            }
+                            .setGroupConversation(false)
+            )
             .setWhen(chat.messages.last().timestamp)
 
         notificationManager.notify(chat.contact.id.toInt(), builder.build())
