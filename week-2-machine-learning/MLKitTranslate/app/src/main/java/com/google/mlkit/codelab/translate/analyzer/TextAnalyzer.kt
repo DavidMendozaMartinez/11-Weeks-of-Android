@@ -26,12 +26,11 @@ import androidx.camera.core.ImageProxy
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.MutableLiveData
 import com.google.android.gms.tasks.Task
-import com.google.mlkit.common.MlKitException
 import com.google.mlkit.codelab.translate.util.ImageUtils
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
-import java.lang.Exception
 
 /**
  * Analyzes the frames passed in from the camera and returns any detected text within the requested
@@ -44,9 +43,11 @@ class TextAnalyzer(
     private val imageCropPercentages: MutableLiveData<Pair<Int, Int>>
 ) : ImageAnalysis.Analyzer {
 
-    // TODO: Instantiate TextRecognition detector
+    private val detector = TextRecognition.getClient()
 
-    // TODO: Add lifecycle observer to properly close ML Kit detectors
+    init {
+        lifecycle.addObserver(detector)
+    }
 
     @androidx.camera.core.ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
@@ -94,11 +95,26 @@ class TextAnalyzer(
         val croppedBitmap =
             ImageUtils.rotateAndCrop(convertImageToBitmap, rotationDegrees, cropRect)
 
-        // TODO call recognizeText() once implemented
+        recognizeTextOnDevice(InputImage.fromBitmap(croppedBitmap, 0)).addOnCompleteListener {
+            imageProxy.close()
+        }
     }
 
-    fun recognizeText() {
-        // TODO Use ML Kit's TextRecognition to analyze frames from the camera live feed.
+    private fun recognizeTextOnDevice(image: InputImage): Task<Text> {
+        // Pass image to an ML Kit Vision API
+        return detector.process(image)
+            .addOnSuccessListener { visionText ->
+                // Task completed successfully
+                result.value = visionText.text
+            }
+            .addOnFailureListener { exception ->
+                // Task failed with an exception
+                Log.e(TAG, "Text recognition error", exception)
+                val message = getErrorMessage(exception)
+                message?.let {
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            }
     }
 
     private fun getErrorMessage(exception: Exception): String? {
