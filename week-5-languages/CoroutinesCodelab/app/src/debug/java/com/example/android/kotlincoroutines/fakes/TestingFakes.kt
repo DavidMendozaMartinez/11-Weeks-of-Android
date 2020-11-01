@@ -26,10 +26,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import okhttp3.Request
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 
 /**
  * Fake [TitleDao] for use in tests.
@@ -45,7 +41,7 @@ class TitleDaoFake(initialTitle: String) : TitleDao {
      */
     private val insertedForNext = Channel<Title>(capacity = Channel.BUFFERED)
 
-    override fun insertTitle(title: Title) {
+    override suspend fun insertTitle(title: Title) {
         insertedForNext.offer(title)
         _titleLiveData.value = title
     }
@@ -65,10 +61,8 @@ class TitleDaoFake(initialTitle: String) : TitleDao {
      * If multiple items were inserted, this will always match the first item that was not
      * previously matched.
      *
-     * @param expected the value to match
      * @param timeout duration to wait (this is provided for instrumentation tests that may run on
      *                multiple threads)
-     * @param unit timeunit
      * @return the next value that was inserted into this dao, or null if none found
      */
     fun nextInsertedOrNull(timeout: Long = 2_000): String? {
@@ -90,59 +84,15 @@ class TitleDaoFake(initialTitle: String) : TitleDao {
 /**
  * Testing Fake implementation of MainNetwork
  */
-class MainNetworkFake(var result: String) : MainNetwork {
-    override fun fetchNextTitle() = MakeCompilerHappyForStarterCode() // TODO: replace with `result`
+class MainNetworkFake(private var result: String) : MainNetwork {
+    override suspend fun fetchNextTitle() = result
 }
 
 /**
  * Testing Fake for MainNetwork that lets you complete or error all current requests
  */
-class MainNetworkCompletableFake() : MainNetwork {
+class MainNetworkCompletableFake : MainNetwork {
     private var completable = CompletableDeferred<String>()
 
-    override fun fetchNextTitle() = MakeCompilerHappyForStarterCode() // TODO: replace with `completable.await()`
-
-    fun sendCompletionToAllCurrentRequests(result: String) {
-        completable.complete(result)
-        completable = CompletableDeferred()
-    }
-
-    fun sendErrorToCurrentRequests(throwable: Throwable) {
-        completable.completeExceptionally(throwable)
-        completable = CompletableDeferred()
-    }
-
-}
-
-typealias MakeCompilerHappyForStarterCode = FakeCallForRetrofit<String>
-
-/**
- * This class only exists to make the starter code compile. Remove after refactoring retrofit to use
- * suspend functions.
- */
-class FakeCallForRetrofit<T> : Call<T> {
-    override fun enqueue(callback: Callback<T>) {
-        // nothing
-    }
-
-    override fun isExecuted() = false
-
-    override fun clone(): Call<T> {
-        return this
-    }
-
-    override fun isCanceled() = true
-
-    override fun cancel() {
-        // nothing
-    }
-
-    override fun execute(): Response<T> {
-        TODO("Not implemented")
-    }
-
-    override fun request(): Request {
-        TODO("Not implemented")
-    }
-
+    override suspend fun fetchNextTitle() = completable.await()
 }
