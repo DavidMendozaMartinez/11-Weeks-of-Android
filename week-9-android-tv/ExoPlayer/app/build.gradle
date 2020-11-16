@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    compileSdkVersion 30
+    buildToolsVersion "30.0.2"
+
+    defaultConfig {
+        applicationId "com.google.android.exoplayer2.demo"
+        minSdkVersion 23
+        targetSdkVersion 30
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    flavorDimensions "decoderExtensions"
+
+    productFlavors {
+        noDecoderExtensions {
+            dimension "decoderExtensions"
+            buildConfigField "boolean", "USE_DECODER_EXTENSIONS", "false"
+        }
+        withDecoderExtensions {
+            dimension "decoderExtensions"
+            buildConfigField "boolean", "USE_DECODER_EXTENSIONS", "true"
+        }
+    }
+}
+
+dependencies {
+    compileOnly 'org.checkerframework:checker-qual:3.3.0'
+    implementation 'androidx.annotation:annotation:1.1.0'
+    implementation 'androidx.appcompat:appcompat:1.2.0'
+    implementation 'androidx.multidex:multidex:2.0.1'
+    implementation 'com.google.android.material:material:1.2.1'
+    implementation 'com.google.android.exoplayer:exoplayer:2.12.1'
+    implementation 'com.google.android.exoplayer:extension-cronet:2.12.1'
+    implementation 'com.google.android.exoplayer:extension-ima:2.12.1'
+}
