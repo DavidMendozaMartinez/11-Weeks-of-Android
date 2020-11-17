@@ -21,6 +21,11 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.ResultReceiver;
+import android.support.v4.media.MediaDescriptionCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+import android.util.Log;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
@@ -33,6 +38,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.ControlDispatcher;
 import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.PlaybackPreparer;
@@ -42,6 +48,8 @@ import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.audio.AudioAttributes;
 import com.google.android.exoplayer2.drm.FrameworkMediaDrm;
 import com.google.android.exoplayer2.ext.ima.ImaAdsLoader;
+import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector;
+import com.google.android.exoplayer2.ext.mediasession.TimelineQueueNavigator;
 import com.google.android.exoplayer2.mediacodec.MediaCodecRenderer.DecoderInitializationException;
 import com.google.android.exoplayer2.mediacodec.MediaCodecUtil.DecoderQueryException;
 import com.google.android.exoplayer2.offline.DownloadRequest;
@@ -89,6 +97,9 @@ public class PlayerActivity extends AppCompatActivity
   protected LinearLayout debugRootView;
   protected TextView debugTextView;
   protected SimpleExoPlayer player;
+
+  private MediaSessionCompat mediaSession;
+  private MediaSessionConnector mediaSessionConnector;
 
   private boolean isShowingTrackSelectionDialog;
   private Button selectTracksButton;
@@ -159,6 +170,10 @@ public class PlayerActivity extends AppCompatActivity
         playerView.onResume();
       }
     }
+
+    if (mediaSession != null) {
+      mediaSession.setActive(true);
+    }
   }
 
   @Override
@@ -186,6 +201,11 @@ public class PlayerActivity extends AppCompatActivity
   @Override
   public void onStop() {
     super.onStop();
+
+    if (mediaSession != null) {
+      mediaSession.setActive(false);
+    }
+
     if (Util.SDK_INT > 23) {
       if (playerView != null) {
         playerView.onPause();
@@ -307,7 +327,53 @@ public class PlayerActivity extends AppCompatActivity
       playerView.setPlaybackPreparer(this);
       debugViewHelper = new DebugTextViewHelper(player, debugTextView);
       debugViewHelper.start();
+
+      mediaSession = new MediaSessionCompat(this, "sample");
+      mediaSessionConnector = new MediaSessionConnector(mediaSession);
+      mediaSessionConnector.setPlayer(player);
+
+      mediaSessionConnector.setQueueNavigator(new TimelineQueueNavigator(mediaSession) {
+        @Override
+        public MediaDescriptionCompat getMediaDescription(Player player, int windowIndex) {
+          return new MediaDescriptionCompat.Builder()
+                  .setTitle("MediaDescription title")
+                  .setDescription("MediaDescription description for " + windowIndex)
+                  .setSubtitle("MediaDescription subtitle")
+                  .build();
+        }
+      });
+
+      mediaSessionConnector.setEnabledPlaybackActions(
+              PlaybackStateCompat.ACTION_PLAY_PAUSE
+                      | PlaybackStateCompat.ACTION_PLAY
+                      | PlaybackStateCompat.ACTION_PAUSE
+                      | PlaybackStateCompat.ACTION_SEEK_TO
+                      | PlaybackStateCompat.ACTION_FAST_FORWARD
+                      | PlaybackStateCompat.ACTION_REWIND
+                      | PlaybackStateCompat.ACTION_STOP
+                      | PlaybackStateCompat.ACTION_SET_REPEAT_MODE
+                      | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE
+      );
     }
+
+    mediaSessionConnector.setCaptionCallback(new MediaSessionConnector.CaptionCallback() {
+        @Override
+        public void onSetCaptioningEnabled(Player player, boolean enabled) {
+          Log.d("MediaSession", "onSetCaptioningEnabled: enabled=" + enabled);
+        }
+
+        @Override
+        public boolean hasCaptions(Player player) {
+          return true;
+        }
+
+        @Override
+        public boolean onCommand(Player player, ControlDispatcher controlDispatcher, String command, Bundle extras, ResultReceiver cb) {
+          return false;
+        }
+      }
+    );
+
     boolean haveStartPosition = startWindow != C.INDEX_UNSET;
     if (haveStartPosition) {
       player.seekTo(startWindow, startPosition);
@@ -382,6 +448,11 @@ public class PlayerActivity extends AppCompatActivity
   }
 
   protected void releasePlayer() {
+
+    if (mediaSession != null) {
+      mediaSession.release();
+    }
+
     if (player != null) {
       updateTrackSelectorParameters();
       updateStartPosition();
