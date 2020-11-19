@@ -20,7 +20,6 @@ import android.net.Uri
 import android.provider.BaseColumns
 import android.support.media.tv.TvContractCompat
 import android.support.media.tv.WatchNextProgram
-import android.text.TextUtils
 import android.util.Log
 import com.example.android.watchnextcodelab.model.Movie
 
@@ -69,15 +68,53 @@ object WatchNextTvProvider {
 
         val movieId = movie.movieId.toString()
 
-        // TODO: Step 3 - find the existing program, see if it has been removed, and check if we
-        // should update the program.
+        // Find the existing program, see if it has been removed, and check if we should update the program.
 
+        // Check if the movie is in the watch next row.
+        val existingProgram = findProgramByMovieId(context, movieId)
 
-        // TODO: Step 6 - Create the content values for the Content Provider.
+        // If the program is not visible, remove it from the Tv Provider, and treat the movie as a new watch next program.
+        val removed = removeIfNotBrowsable(context, existingProgram)
 
+        val shouldUpdateProgram = existingProgram != null && !removed
 
-        // TODO: Step 7 - Update or add the program to the content provider.
-        return -1 // Replace this return statement with the code from the codelab
+        // Create the content values for the Content Provider.
+        val builder = if (shouldUpdateProgram) {
+            WatchNextProgram.Builder(existingProgram)
+        } else {
+            convertMovie(movie)
+        }
+
+        // Update the Watch Next type since the user has explicitly asked for the movie to be added to the Play Next row.
+        builder.setWatchNextType(watchNextType)
+                .setLastEngagementTimeUtcMillis(System.currentTimeMillis())
+        if (playbackPosition != null) {
+            builder.setLastPlaybackPositionMillis(playbackPosition)
+        }
+
+        val contentValues = builder.build().toContentValues()
+
+        // Update or add the program to the content provider.
+        if (shouldUpdateProgram) {
+            val program = existingProgram as WatchNextProgram
+            val watchNextProgramId = program.id
+            val watchNextProgramUri = TvContractCompat.buildWatchNextProgramUri(watchNextProgramId)
+            val rowsUpdated = context.contentResolver.update(
+                    watchNextProgramUri, contentValues, null, null)
+            if (rowsUpdated < 1) {
+                Log.e(TAG, "Failed to update watch next program $watchNextProgramId")
+                return -1L
+            }
+            return watchNextProgramId
+        } else {
+            val programUri = context.contentResolver.insert(
+                    TvContractCompat.WatchNextPrograms.CONTENT_URI, contentValues)
+
+            if (programUri == null || programUri == Uri.EMPTY) {
+                Log.e(TAG, "Failed to insert movie, $movieId, into the watch next row")
+            }
+            return ContentUris.parseId(programUri)
+        }
     }
 
     fun deleteFromWatchNext(context: Context, movieId: String) {
@@ -88,13 +125,26 @@ object WatchNextTvProvider {
     }
 
     private fun findProgramByMovieId(context: Context, movieId: String): WatchNextProgram? {
-        // TODO: Step 4 - Find the movie by our app's internal id.
-
+        // Find the movie by our app's internal id.
+        context.contentResolver
+                .query(TvContractCompat.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_MAP_PROJECTION,
+                        null, null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        do {
+                            val watchNextInternalId =
+                                    cursor.getString(COLUMN_WATCH_NEXT_INTERNAL_PROVIDER_ID_INDEX)
+                            if (movieId == watchNextInternalId) {
+                                return WatchNextProgram.fromCursor(cursor)
+                            }
+                        } while (cursor.moveToNext())
+                    }
+                }
         return null
     }
 
     private fun removeIfNotBrowsable(context: Context, program: WatchNextProgram?): Boolean {
-        // TODO: Step 5 - Check is a program has been removed from the UI by the user. If so, then
+        // Check is a program has been removed from the UI by the user. If so, then
         // remove the program from the content provider.
         if (program?.isBrowsable == false) {
             val watchNextProgramId = program.id
@@ -116,7 +166,7 @@ object WatchNextTvProvider {
 
     private fun convertMovie(movie: Movie): WatchNextProgram.Builder {
 
-        val movieId = java.lang.Long.toString(movie.movieId)
+        val movieId = movie.movieId.toString()
         val builder = WatchNextProgram.Builder()
         builder.setTitle(movie.title)
             .setDescription(movie.description)

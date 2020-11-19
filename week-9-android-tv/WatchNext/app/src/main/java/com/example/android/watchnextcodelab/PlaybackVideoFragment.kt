@@ -36,11 +36,10 @@ import com.bumptech.glide.request.transition.Transition
 import com.example.android.watchnextcodelab.channels.scheduleAddToWatchNextContinue
 import com.example.android.watchnextcodelab.channels.scheduleAddingToWatchNextNext
 import com.example.android.watchnextcodelab.channels.scheduleRemoveFromWatchNextContinue
-import com.example.android.watchnextcodelab.channels.scheduleRemoveFromWatchlist
 import com.example.android.watchnextcodelab.database.SharedPreferencesDatabase
 import com.example.android.watchnextcodelab.model.Movie
 
-const private val TAG = "PlaybackVideoFragment"
+private const val TAG = "PlaybackVideoFragment"
 
 /**
  * Handles video playback with media controls.
@@ -109,15 +108,15 @@ class PlaybackVideoFragment : VideoSupportFragment() {
     private fun getResumePlaybackPosition(movie: Movie): Long {
         context?.let { context ->
             return SharedPreferencesDatabase()
-                .findPlaybackPositionForMovie(context, movie)
-                .toLong()
+                    .findPlaybackPositionForMovie(context, movie)
+                    .toLong()
         }
         return -1
     }
 
     private fun updatePlaybackState() {
         val stateBuilder = PlaybackStateCompat.Builder()
-            .setActions(getAvailableActions())
+                .setActions(getAvailableActions())
         var state = PlaybackStateCompat.STATE_PAUSED
         if (playerGlue?.isPlaying == true) {
             state = PlaybackState.STATE_PLAYING
@@ -154,20 +153,20 @@ class PlaybackVideoFragment : VideoSupportFragment() {
         metadataBuilder.putString(MediaMetadata.METADATA_KEY_ARTIST, description)
 
         Glide.with(context)
-            .asBitmap()
-            .load(Uri.parse(cardImageUrl))
-            .into(object : SimpleTarget<Bitmap>() {
-                override fun onResourceReady(bitmap: Bitmap?,
-                    transition: Transition<in Bitmap>?) {
-                    metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap)
-                    session.setMetadata(metadataBuilder.build())
-                }
+                .asBitmap()
+                .load(Uri.parse(cardImageUrl))
+                .into(object : SimpleTarget<Bitmap>() {
+                    override fun onResourceReady(bitmap: Bitmap?,
+                                                 transition: Transition<in Bitmap>?) {
+                        metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap)
+                        session.setMetadata(metadataBuilder.build())
+                    }
 
-                override fun onLoadFailed(errorDrawable: Drawable?) {
-                    Log.e(TAG, "onLoadFailed: " + errorDrawable)
-                    session.setMetadata(metadataBuilder.build())
-                }
-            })
+                    override fun onLoadFailed(errorDrawable: Drawable?) {
+                        Log.e(TAG, "onLoadFailed: $errorDrawable")
+                        session.setMetadata(metadataBuilder.build())
+                    }
+                })
     }
 
 }
@@ -194,16 +193,28 @@ private class SyncWatchNextCallback(private val context: Context, private val mo
     override fun onPlayStateChanged(glue: PlaybackGlue) {
         Log.d(TAG, "Player state changed: is ${if (glue.isPlaying) "playing" else "paused"}")
 
-        // TODO: Step 1 - Update the Play Next row when the video is paused.
-
+        // Update the Play Next row when the video is paused.
+        if (!glue.isPlaying) {
+            val controlGlue = glue as PlaybackTransportControlGlue<*>
+            // Get the current position to update the progress bar in the UI.
+            val playbackPosition = controlGlue.playerAdapter.currentPosition.toInt()
+            // Schedule the video to be added in a background job.
+            scheduleAddToWatchNextContinue(context, movie, playbackPosition)
+        }
     }
 
     override fun onPlayCompleted(glue: PlaybackGlue) {
         Log.d(TAG, "Playback completed, time to remove the program from the Play Next row.")
 
-        // TODO: Step 2 - Schedule remove the program from the Play Next row.
+        // Schedule remove the program from the Play Next row.
+        scheduleRemoveFromWatchNextContinue(context = context, movie = movie)
 
-        // TODO: Step 8 - Schedule the next video to be added to the Play Next row.
+        // Schedule the next video to be added to the Play Next row.
+        movie.nextMovieIdInSeries?.let { id ->
+            if (id > -1L) {
+                scheduleAddingToWatchNextNext(context = context, movieId = id)
+            }
+        }
     }
 }
 
