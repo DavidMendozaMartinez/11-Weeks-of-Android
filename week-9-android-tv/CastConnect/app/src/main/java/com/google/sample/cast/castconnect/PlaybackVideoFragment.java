@@ -19,6 +19,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
+import android.widget.Toast;
 
 import androidx.leanback.app.VideoSupportFragment;
 import androidx.leanback.app.VideoSupportFragmentGlueHost;
@@ -34,6 +35,22 @@ import com.google.android.exoplayer2.source.hls.HlsMediaSource;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.util.Util;
+import com.google.android.gms.cast.MediaError;
+import com.google.android.gms.cast.MediaInfo;
+import com.google.android.gms.cast.MediaLoadRequestData;
+import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.MediaStatus;
+import com.google.android.gms.cast.tv.CastReceiverContext;
+import com.google.android.gms.cast.tv.media.MediaCommandCallback;
+import com.google.android.gms.cast.tv.media.MediaException;
+import com.google.android.gms.cast.tv.media.MediaLoadCommandCallback;
+import com.google.android.gms.cast.tv.media.MediaManager;
+import com.google.android.gms.cast.tv.media.QueueUpdateRequestData;
+import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.Tasks;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * Handles video playback with media controls.
@@ -42,6 +59,8 @@ public class PlaybackVideoFragment extends VideoSupportFragment {
 
     private static final String LOG_TAG = "PlaybackVideoFragment";
     private static final int UPDATE_DELAY = 16;
+
+    private CastReceiverContext castReceiverContext;
 
     private SimpleExoPlayer mPlayer;
     private Movie mMovie;
@@ -103,6 +122,23 @@ public class PlaybackVideoFragment extends VideoSupportFragment {
             mMediaSessionConnector = new MediaSessionConnector(mMediaSession);
             mMediaSessionConnector.setPlayer(mPlayer);
             mMediaSessionConnector.setMediaMetadataProvider(mMediaMetadataProvider);
+
+            castReceiverContext = CastReceiverContext.getInstance();
+            if (castReceiverContext != null) {
+                MediaManager mediaManager = castReceiverContext.getMediaManager();
+                mediaManager.setSessionCompatToken(mMediaSession.getSessionToken());
+                mediaManager.setMediaLoadCommandCallback(new MyMediaLoadCommandCallback());
+                mediaManager.setMediaCommandCallback(new MyMediaCommandCallback());
+
+                // Use MediaStatusInterceptor to process the MediaStatus before sending out.
+                mediaManager.setMediaStatusInterceptor(mediaStatusWriter -> {
+                    try {
+                        mediaStatusWriter.setCustomData(new JSONObject("{myData: 'CustomData'}"));
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                    }
+                });
+            }
         }
     }
 
@@ -110,6 +146,12 @@ public class PlaybackVideoFragment extends VideoSupportFragment {
         if (mMediaSession != null) {
             mMediaSession.release();
         }
+
+        if (castReceiverContext != null) {
+            MediaManager mediaManager = castReceiverContext.getMediaManager();
+            mediaManager.setSessionCompatToken(null);
+        }
+
         if (mPlayer != null) {
             mPlayer.release();
             mPlayer = null;
@@ -136,7 +178,15 @@ public class PlaybackVideoFragment extends VideoSupportFragment {
         mPlayer.prepare(hlsMediaSource);
     }
 
-    public void processIntent(Intent intent) {
+    public void processIntent(Intent intent) {MediaManager mediaManager = CastReceiverContext.getInstance().getMediaManager();
+        // Pass intent to Cast SDK
+        if (mediaManager.onNewIntent(intent)) {
+            return;
+        }
+
+        // Clears all overrides in the modifier.
+        mediaManager.getMediaStatusModifier().clear();
+
         if (intent.hasExtra(PlaybackActivity.MOVIE)) {
             mMovie = (Movie) intent.getSerializableExtra(PlaybackActivity.MOVIE);
             play(mMovie);
@@ -165,6 +215,81 @@ public class PlaybackVideoFragment extends VideoSupportFragment {
                     MediaMetadataCompat.METADATA_KEY_DURATION, mTransportControlGlue.getDuration());
 
             return mediaMetadata.build();
+        }
+    }
+
+    private class MyMediaLoadCommandCallback extends MediaLoadCommandCallback {
+        @Override
+        public Task<MediaLoadRequestData> onLoad(String senderId, MediaLoadRequestData mediaLoadRequestData) {
+            Toast.makeText(getActivity(), "onLoad()", Toast.LENGTH_SHORT).show();
+
+            if (mediaLoadRequestData == null) {
+                // Throw MediaException to indicate load failure.
+                return Tasks.forException(new MediaException(
+                        new MediaError.Builder()
+                                .setDetailedErrorCode(MediaError.DetailedErrorCode.LOAD_FAILED)
+                                .setReason(MediaError.ERROR_REASON_INVALID_REQUEST)
+                                .build()));
+            }
+
+            return Tasks.call(() -> {
+                play(convertLoadRequestToMovie(mediaLoadRequestData));
+
+                // Update media metadata and state
+                MediaManager mediaManager = castReceiverContext.getMediaManager();
+                mediaManager.setDataFromLoad(mediaLoadRequestData);
+
+                // Use MediaStatusModifier to provide additional information for Cast senders.
+                mediaManager.getMediaStatusModifier()
+                        .setMediaCommandSupported(MediaStatus.COMMAND_QUEUE_NEXT, true)
+                        .setIsPlayingAd(false);
+
+                mediaManager.broadcastMediaStatus();
+
+                // Return the resolved MediaLoadRequestData to indicate load success.
+                return mediaLoadRequestData;
+            });
+        }
+    }
+
+    private Movie convertLoadRequestToMovie(MediaLoadRequestData mediaLoadRequestData) {
+        if (mediaLoadRequestData == null) {
+            return null;
+        }
+        MediaInfo mediaInfo = mediaLoadRequestData.getMediaInfo();
+        if (mediaInfo == null) {
+            return null;
+        }
+
+        String videoUrl = mediaInfo.getContentId();
+        if (mediaInfo.getContentUrl() != null) {
+            videoUrl = mediaInfo.getContentUrl();
+        }
+
+        MediaMetadata metadata = mediaInfo.getMetadata();
+        Movie movie = new Movie();
+        movie.setVideoUrl(videoUrl);
+        if (metadata != null) {
+            movie.setTitle(metadata.getString(MediaMetadata.KEY_TITLE));
+            movie.setDescription(metadata.getString(MediaMetadata.KEY_SUBTITLE));
+            movie.setCardImageUrl(metadata.getImages().get(0).getUrl().toString());
+        }
+        return movie;
+    }
+
+    private class MyMediaCommandCallback extends MediaCommandCallback {
+        @Override
+        public Task<Void> onQueueUpdate(String senderId, QueueUpdateRequestData queueUpdateRequestData) {
+            Toast.makeText(getActivity(), "onQueueUpdate()", Toast.LENGTH_SHORT).show();
+
+            // Queue Prev / Next
+            if (queueUpdateRequestData.getJump() != null) {
+                Toast.makeText(getActivity(),
+                        "onQueueUpdate(): Jump = " + queueUpdateRequestData.getJump(),
+                        Toast.LENGTH_SHORT).show();
+            }
+
+            return super.onQueueUpdate(senderId, queueUpdateRequestData);
         }
     }
 }

@@ -31,12 +31,23 @@
 
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.cast.tv.action.LAUNCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
         </activity>
         <activity
             android:name="com.google.sample.cast.castconnect.PlaybackActivity"
             android:launchMode="singleTask">
-
+            <intent-filter>
+                <action android:name="com.google.android.gms.cast.tv.action.LOAD"/>
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+        <meta-data
+            android:name="com.google.android.gms.cast.tv.RECEIVER_OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.google.sample.cast.castconnect.CastReceiverOptionsProvider" />
     </application>
 
 </manifest>
